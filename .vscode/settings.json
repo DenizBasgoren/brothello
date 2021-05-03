@@ -1,0 +1,8 @@
+{
+	"files.associations": {
+		"cctype": "c",
+		"cstdlib": "c",
+		"chrono": "c",
+		"condition_variable": "c"
+	}
+}
