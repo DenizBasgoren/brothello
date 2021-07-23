@@ -16,9 +16,18 @@
 
 const char* empty_space = "                                           ";
 
+const char* gameOverReasons[] = {
+	"You won!",
+	"You lost!",
+	"Game is tied!",
+	"Connection is lost.",
+	"Opponent resigned.",
+	"You resigned."
+};
 
 #define NAME_MAXLEN 15
 #define MSG_MAXLEN 49
+#define PLAYERS_MAXLEN 10
 int view = 0; // 0 lobby, 1 game
 int highlightX = 0;
 
@@ -53,17 +62,17 @@ struct player {
 };
 
 int onlinePlayersX = 0;
-// struct player onlinePlayers[10] = {
+// struct player onlinePlayers[PLAYERS_MAXLEN] = {
 // 	{{0}, "Aorsan"},
 // 	{{0}, "Borsan"},
 // 	{{0}, "Corsan"},
 // 	{{0}, "Dorsan"},
 // };
-struct player onlinePlayers[10];
+struct player onlinePlayers[PLAYERS_MAXLEN];
 
 
 int gameRequestsX = 3;
-struct player gameRequests[10] = {
+struct player gameRequests[PLAYERS_MAXLEN] = {
 	{{0}, "Korsan"},
 	{{0}, "Torsa"},
 	{{0}, "Mammmaaamiii"},
@@ -77,6 +86,7 @@ char myBubble[MSG_MAXLEN+1];
 int myBubbleX = 0;
 bool myTurn = true;
 bool gameOver = false;
+int gameOverReason = 0;
 bool showHints = false;
 bool showLegalMoves = false;
 bool opponentIsBot = false;
@@ -162,29 +172,42 @@ void* timer_main( void* _ ) {
 		if (transitionCountdown>0) transitionCountdown--;
 
 		if (botCountdown>0) botCountdown--;
-		else if (botCountdown==0) {
-			copyBoard(board,prevBoard);
-			registerMove(board,hintByZebro(board,!mySide),!mySide);
-			transitionCountdown = TRANSITION_TIME;
-			bool imStuck = playerMustSkip(board,mySide);
-			bool botIsStuck = playerMustSkip(board,!mySide);
-			if (imStuck && botIsStuck) {
-				// gameover
-				gameOver = true;
-				botCountdown = -1;
-			}
-			else if (imStuck) {
-				// bot plays again
-				botCountdown = BOT_THINKING_TIME;
+		else if (botCountdown==0 && !gameOver) {
+			struct Move m = hintByZebro(board,!mySide);
+			if (moveIsLegal(board,m,!mySide)) {
+				copyBoard(board,prevBoard);
+				registerMove(board,m,!mySide);
+				transitionCountdown = TRANSITION_TIME;
+				bool imStuck = playerMustSkip(board,mySide);
+				bool botIsStuck = playerMustSkip(board,!mySide);
+				if (imStuck && botIsStuck) {
+					// gameover
+					gameOver = true;
+					int myPts = countDiscs(board, mySide);
+					int hisPts = countDiscs(board, !mySide);
+					if (myPts > hisPts) gameOverReason = 0; // you won
+					else if (myPts < hisPts) gameOverReason = 1; // you lost
+					else gameOverReason = 2; // you tied
+
+					botCountdown = -1;
+				}
+				else if (imStuck) {
+					// bot plays again
+					botCountdown = BOT_THINKING_TIME;
+				}
+				else {
+					myTurn = true;
+					botCountdown = -1;
+				}
 			}
 			else {
-				myTurn = true;
-				botCountdown = -1;
+				gameOver = true;
+				gameOverReason = 4; // opponent resigned
 			}
 		}
 
 		// once in 10sec, broadcast 'Im online'
-		if (counter % 20 == 0) {
+		if (counter % 2 == 0) { ///
 
 			struct sockaddr_in brdcast_addr;
 			memset(&brdcast_addr, 0, sizeof(brdcast_addr) );
@@ -195,9 +218,10 @@ void* timer_main( void* _ ) {
 
 			int err = sendto(udp_sd, myName, myNameX+1, 0, (struct sockaddr*)&brdcast_addr, sizeof(brdcast_addr));
 			if (err==-1) {
-				setCursorPosition(1,1);
-				fprintf(stdout, strerror(errno) );
-				fflush(stdout);
+				// don't do anything on error
+				// setCursorPosition(1,1);
+				// fprintf(stdout, strerror(errno) );
+				// fflush(stdout);
 			}
 		}
 
@@ -246,15 +270,15 @@ void* input_main( void* _ ) {
 
 					}
 					else {
-						// TODO play with bots
 						reqI = highlightX - (3 + 2*gameRequestsX + onlinePlayersX);
 						if (reqI==0) { // zebro
 							// PLAY WITH ZEBRO
-							prepareGameWithBot(reqI);						}
+							prepareGameWithBot(reqI);
+						}
 					}
 				}
 				else if (view == 1) {
-					 if (c==32) {
+					if (c==32) {
 						if (myBubbleX!=MSG_MAXLEN) {
 							// not full
 							myBubble[myBubbleX++] = c;
@@ -265,7 +289,7 @@ void* input_main( void* _ ) {
 					else if (highlightX<64 && c==13) {
 						clearCursorFromBoard();
 						clickEffectX = highlightX;
-						tryToMakeAMove((struct Move){highlightX%8,highlightX/8});						
+						tryToMakeAMove((struct Move){highlightX%8,highlightX/8});
 					}
 					else if (highlightX==64 && c==13) {
 						clickEffectX = highlightX;
@@ -278,9 +302,18 @@ void* input_main( void* _ ) {
 					else if (highlightX==66 && c==13) {
 						clickEffectX = highlightX;
 						// Resign
-						view = 0;
-						highlightX = 0;
-						// TODO let other party know via tcp
+						if (gameOver) {
+							view = 0;
+							highlightX = 0;
+						}
+						else {
+							// TODO let other party know via tcp
+							gameOver = true;
+							gameOverReason = 5; // you resigned
+						}
+					}
+					else if (highlightX==67 && c==13) {
+						clearScreen();
 					}
 				}
 			}
@@ -327,7 +360,7 @@ void* input_main( void* _ ) {
 				else if (view == 1) {
 					memset(myBubble,'\0',MSG_MAXLEN);
 					myBubbleX = 0;
-					// TODO tcp req
+					// TODO tcp req (msg removed)
 				}
 			}
 			else if (c == 127) {
@@ -407,7 +440,7 @@ void* input_main( void* _ ) {
 				}
 				else if (view == 1) {
 					clearCursorFromBoard();
-					if (highlightX>=56 && highlightX<64 || highlightX==66) {}
+					if (highlightX>=56 && highlightX<64 || highlightX==67) {}
 					else if (highlightX>=64) highlightX++;
 					else highlightX+=8;
 				}
@@ -426,7 +459,8 @@ void* input_main( void* _ ) {
 					else if (highlightX%8==7) {
 						if (highlightX/8<=2) highlightX=64;
 						else if (highlightX/8==3) highlightX=65;
-						else highlightX=66;
+						else if (highlightX/8==4) highlightX=66;
+						else highlightX=67;
 					}
 					else highlightX++;
 				}
@@ -444,6 +478,7 @@ void* input_main( void* _ ) {
 					if (highlightX==64) highlightX=23;
 					else if (highlightX==65) highlightX=31;
 					else if (highlightX==66) highlightX=39;
+					else if (highlightX==67) highlightX=47;
 					else if (highlightX%8==0) {}
 					else highlightX--;
 				}
@@ -483,22 +518,65 @@ void* udp_main( void* _ ) {
 
 
 
-
-	char response[128] = {0};
+	// we only get names by UDP, so length is name_length + null byte
+	char response[NAME_MAXLEN+1] = {0};
 	while(true) {
-		struct sockaddr bypasser_addr;
+		struct sockaddr_in bypasser_addr;
 		memset(&bypasser_addr, 0, sizeof(bypasser_addr) );
-		socklen_t bypasser_addrlen = sizeof(struct sockaddr);
+		socklen_t bypasser_addrlen = sizeof(struct sockaddr_in);
 
-		int result = recvfrom(udp_sd, response, 128, 0, &bypasser_addr, &bypasser_addrlen);
+		int result = recvfrom(udp_sd, response, NAME_MAXLEN+1, 0, (struct sockaddr*)&bypasser_addr, &bypasser_addrlen);
 		if (result == -1) {
 			close(udp_sd);
 			puts("udper3");
 			exit(1);
 		}
+
+		// check if it's a proper name: null terminated and all chars [33,125]
+		bool endsWithZero = false;
+		bool allCharsAreAlphanumeric = true;
+		for (int i = 0; i<NAME_MAXLEN+1; i++) {
+			if (response[i] == '\0') {
+				endsWithZero = true;
+				break;
+			}
+			if (response[i] < 33 || response[i] > 125) {
+				allCharsAreAlphanumeric = false;
+				break;
+			}
+		}
+		if (!endsWithZero || !allCharsAreAlphanumeric) {
+			continue;
+		}
+
+		bool found = false;
+		for (int i = 0; i<onlinePlayersX; i++) {
+			bool sameAddr = memcmp(&onlinePlayers[i].addr, &bypasser_addr, sizeof(struct sockaddr_in)) == 0;
+			bool sameName = strcmp(onlinePlayers[i].name, response) == 0;
+
+			if (sameAddr && sameName) {
+				found = true;
+				break;
+			}
+			else if (sameAddr) {
+				strcpy(onlinePlayers[i].name, response);
+				found = true;
+				break;
+			}
+		}
+
+		if (found) continue;
+
+		if (onlinePlayersX==PLAYERS_MAXLEN) onlinePlayersX = 0;
+
+		memcpy( &onlinePlayers[onlinePlayersX].addr, &bypasser_addr, sizeof(struct sockaddr_in) );
+		strcpy( onlinePlayers[onlinePlayersX].name, response);
+		onlinePlayersX++;
+		// clearScreen();
+		// draw();
 		
 		// TODO
-		// if (onlinePlayersX<10) {
+		// if (onlinePlayersX<PLAYERS_MAXLEN) {
 		// 	// strcpy(onlinePlayers[onlinePlayersX].name, response);
 		// 	sockaddr_to_str(bypasser_addr,onlinePlayers[onlinePlayersX].name);
 		// 	onlinePlayersX++;
@@ -521,8 +599,9 @@ void* tcp_main( void* _ ) {
 
 void draw(void) {
 	static int prev_view = 0;
-	if (view != prev_view) clearScreen();
-
+	// if (view != prev_view) clearScreen();
+	clearScreen();
+	
 	if (view == 0) draw_lobby();
 	else if (view == 1) draw_game();
 
@@ -571,6 +650,9 @@ void draw_lobby(void) {
 
 	for (int i = 0; i < onlinePlayersX; i++) {
 		setCursorPosition(4, 13+gameRequestsX+i);
+		char ipAddr[22] = {0};
+		sockaddr_to_str( *(struct sockaddr*) &onlinePlayers[i].addr, ipAddr);
+		printf("%-22s", ipAddr);
 		printf("%-" TOSTR(NAME_MAXLEN) "s",onlinePlayers[i].name);
 		draw_button(connectingX==currentX ? "CANCEL" : "CONNECT", highlightX==currentX, clickEffectX==currentX);
 		if (connectingX==currentX++) printf("Connecting...");
@@ -614,11 +696,18 @@ void draw_game(void) {
 	setCursorPosition(8,23);
 	setCursorColor(GREEN);
 	if (myTurn) setCursorStyle(BOLD);
-	printf("%s (%d pts):", myName, countDiscs(board, mySide));
+	int myPts = countDiscs(board, mySide);
+	printf("%s (%d pts):", myName, myPts);
 	
 	setCursorStyle(DEFAULT_STYLE);
 	setCursorColor(DEFAULT_COLOR);
 	printf(" [%-" TOSTR(MSG_MAXLEN) "s]", myBubble);
+	if (myBubbleX == 0) {
+		setCursorPosition(8+myNameX+(myPts>=10?2:1)+10 ,23);
+		setCursorStyle(FAINT);
+		printf("%s","Say \"Hello\" to your opponent!");
+		setCursorStyle(DEFAULT_STYLE);
+	}
 
 	const char* blackDisk = "┌─┐\n\b\b\b└─┘";
 	const char* whiteDisk = "▗▄▖\n\b\b\b▝▀▘";
@@ -666,10 +755,14 @@ void draw_game(void) {
 			else {
 				// dot
 				if (myTurn && showHints && y==bestMove.y && x==bestMove.x) {
+					setCursorColor(RED);
 					printf(" x");
+					setCursorColor(DEFAULT_COLOR);
 				}
 				else if (myTurn && showLegalMoves && moveIsLegal(board,(struct Move){x,y},mySide)) {
+					setCursorColor(YELLOW);
 					printf(" o");
+					setCursorColor(DEFAULT_COLOR);
 				}
 				else {
 					printf(" .");
@@ -696,10 +789,12 @@ void draw_game(void) {
 	setCursorPosition(40,14);
 	printf(empty_space);
 	setCursorPosition(40,14);
-	printf("Game is %s.", gameOver?"over":"on");
+	printf(gameOver?gameOverReasons[gameOverReason]:"Game is on.");
 	setCursorPosition(61,14);
 	draw_button(gameOver?"BACK TO MAIN MENU":"RESIGN", highlightX==66, clickEffectX==66);
 	
+	setCursorPosition(61,16);
+	draw_button("REFRESH SCREEN", highlightX==67, clickEffectX==67);
 
 	int hx = highlightX%8, hy = highlightX/8;
 	if (clickEffectX!=highlightX && highlightX<64) {
@@ -801,7 +896,7 @@ void prepareGameWithBot(int reqId) {
 }
 
 void tryToMakeAMove(struct Move m) {
-	if (gameOver) return;
+	if (gameOver || !myTurn) return;
 
 	if (moveIsLegal(board,m,mySide)) {
 		copyBoard(board,prevBoard);

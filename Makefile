@@ -1,2 +1,2 @@
 build:
-	gcc brothello.c game.c fun.c -o brothello -lpthread
+	gcc brothello.c game.c fun.c -O3 -o brothello -lpthread
