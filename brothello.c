@@ -57,26 +57,28 @@ char connectToIp[NAME_MAXLEN+1];
 int connectToIpX = 0;
 
 struct player {
+	int sd;
 	struct sockaddr_in addr;
 	char name[NAME_MAXLEN+1];
 };
 
 int onlinePlayersX = 0;
 // struct player onlinePlayers[PLAYERS_MAXLEN] = {
-// 	{{0}, "Aorsan"},
-// 	{{0}, "Borsan"},
-// 	{{0}, "Corsan"},
-// 	{{0}, "Dorsan"},
+// 	{0, {0}, "Aorsan"},
+// 	{0, {0}, "Borsan"},
+// 	{0, {0}, "Corsan"},
+// 	{0, {0}, "Dorsan"},
 // };
 struct player onlinePlayers[PLAYERS_MAXLEN];
 
 
-int gameRequestsX = 3;
-struct player gameRequests[PLAYERS_MAXLEN] = {
-	{{0}, "Korsan"},
-	{{0}, "Torsa"},
-	{{0}, "Mammmaaamiii"},
-};
+int gameRequestsX = 0;
+// struct player gameRequests[PLAYERS_MAXLEN] = {
+// 	{1, {0}, "Korsan"},
+// 	{2, {0}, "Torsa"},
+// 	{3, {0}, "Mammmaaamiii"},
+// };
+struct player gameRequests[PLAYERS_MAXLEN];
 
 int botsX = 1; // we only have Zebro for now
 
@@ -92,6 +94,10 @@ bool showLegalMoves = false;
 bool opponentIsBot = false;
 enum Player mySide = WHITE_PLAYER;
 
+struct SocketAndAddress {
+	struct sockaddr_in addr;
+	int sd;
+};
 
 // bot will wait 2 secs before playing
 // countdown is the actual timer. if it's -1, means bot is off.
@@ -104,7 +110,7 @@ int botCountdown = -1;
 const int TRANSITION_TIME = 1;
 int transitionCountdown = 0;
 
-int udp_sd;
+int udp_sd, tcp_sd;
 
 
 // PROTOTYPES
@@ -113,6 +119,7 @@ void* timer_main( void* _ );
 void* input_main( void* _ );
 void* udp_main( void* _ );
 void* tcp_main( void* _ );
+void* opponent_main( void* arg );
 void draw(void);
 void draw_lobby(void);
 void draw_game(void);
@@ -122,6 +129,7 @@ void clearCursorFromBoard(void);
 void prepareGameWithBot(int reqId);
 void tryToMakeAMove(struct Move m);
 void sockaddr_to_str( struct sockaddr a, char* s);
+bool isAProperName( const char* str, int len);
 
 int main(void) {
 
@@ -237,6 +245,12 @@ void* input_main( void* _ ) {
 		NORMAL, GOT_ESC, GOT_91
 	} cpstate = NORMAL;
 
+	int opponent_sd = socket(AF_INET, SOCK_STREAM, 0);
+	if (opponent_sd == -1) {
+		puts("cant create socket. input_main er1");
+		exit(1);
+	}
+
 	while (read(STDIN_FILENO, &c, 1) == 1 && c != 3) {
 		
 		if (cpstate == NORMAL) {
@@ -256,17 +270,48 @@ void* input_main( void* _ ) {
 					else if (highlightX>=3 && highlightX<=2+2*gameRequestsX) {
 						clickEffectX=highlightX;
 						if (highlightX%2==1) {
-							reqI = highlightX-3;
+							reqI = (highlightX-3)/2;
 							// TODO accept connection
 						}
 						else {
-							reqI = highlightX-4;
+							reqI = (highlightX-4)/2;
 							// TODO reject code
+							close(gameRequests[reqI].sd);
+							for (int i = reqI+1; i<gameRequestsX; i++) {
+								memcpy(&gameRequests[i-1], &gameRequests[i], sizeof(struct player) );
+								memset(&gameRequests[i], 0, sizeof(struct player) );
+							}
+							gameRequestsX--;
 						}
 					}
 					else if (highlightX>=3+2*gameRequestsX && highlightX<=2+2*gameRequestsX+onlinePlayersX) {
 						// TODO connect to lan player
 						reqI = highlightX - (3 + 2*gameRequestsX);
+
+						if (highlightX==connectingX) {
+							// cancel
+							close(opponent_sd);
+							connectingX = -1;
+						}
+						else {
+							// connect
+							close(opponent_sd);
+							connectingX = -1;
+							int err = connect(opponent_sd, (struct sockaddr*) &onlinePlayers[reqI].addr, sizeof(struct sockaddr) );
+							if (err == -1) {
+								// TODO cant connect
+								continue;
+							}
+							connectingX=highlightX;
+
+							char buffer[NAME_MAXLEN+2] = {'?'};
+							strcpy(buffer+1, onlinePlayers[reqI].name);
+							ssize_t bytesSent = write(opponent_sd, buffer, NAME_MAXLEN+2);
+							if (bytesSent != NAME_MAXLEN+2) {
+								close(opponent_sd);
+								connectingX = -1;
+							}
+						}
 
 					}
 					else {
@@ -312,9 +357,9 @@ void* input_main( void* _ ) {
 							gameOverReason = 5; // you resigned
 						}
 					}
-					else if (highlightX==67 && c==13) {
-						clearScreen();
-					}
+					// else if (highlightX==67 && c==13) {
+					// 	clearScreen();
+					// }
 				}
 			}
 			else if (c >= 33 && c <= 125) {
@@ -440,7 +485,8 @@ void* input_main( void* _ ) {
 				}
 				else if (view == 1) {
 					clearCursorFromBoard();
-					if (highlightX>=56 && highlightX<64 || highlightX==67) {}
+					// if (highlightX>=56 && highlightX<64 || highlightX==67) {}
+					if (highlightX>=56 && highlightX<64 || highlightX==66) {}
 					else if (highlightX>=64) highlightX++;
 					else highlightX+=8;
 				}
@@ -459,8 +505,9 @@ void* input_main( void* _ ) {
 					else if (highlightX%8==7) {
 						if (highlightX/8<=2) highlightX=64;
 						else if (highlightX/8==3) highlightX=65;
-						else if (highlightX/8==4) highlightX=66;
-						else highlightX=67;
+						// else if (highlightX/8==4) highlightX=66;
+						// else highlightX=67;
+						else highlightX=66;
 					}
 					else highlightX++;
 				}
@@ -478,7 +525,7 @@ void* input_main( void* _ ) {
 					if (highlightX==64) highlightX=23;
 					else if (highlightX==65) highlightX=31;
 					else if (highlightX==66) highlightX=39;
-					else if (highlightX==67) highlightX=47;
+					// else if (highlightX==67) highlightX=47;
 					else if (highlightX%8==0) {}
 					else highlightX--;
 				}
@@ -533,21 +580,7 @@ void* udp_main( void* _ ) {
 		}
 
 		// check if it's a proper name: null terminated and all chars [33,125]
-		bool endsWithZero = false;
-		bool allCharsAreAlphanumeric = true;
-		for (int i = 0; i<NAME_MAXLEN+1; i++) {
-			if (response[i] == '\0') {
-				endsWithZero = true;
-				break;
-			}
-			if (response[i] < 33 || response[i] > 125) {
-				allCharsAreAlphanumeric = false;
-				break;
-			}
-		}
-		if (!endsWithZero || !allCharsAreAlphanumeric) {
-			continue;
-		}
+		if (!isAProperName(response, NAME_MAXLEN+1)) continue;
 
 		bool found = false;
 		for (int i = 0; i<onlinePlayersX; i++) {
@@ -585,6 +618,26 @@ void* udp_main( void* _ ) {
 	}
 }
 
+// check if it's a proper name: null terminated and all chars [33,125]
+bool isAProperName( const char* str, int len) {
+	bool endsWithZero = false;
+	bool allCharsAreAlphanumeric = true;
+	for (int i = 0; i<len; i++) {
+		if (str[i] == '\0') {
+			endsWithZero = true;
+			break;
+		}
+		if (str[i] < 33 || str[i] > 125) {
+			allCharsAreAlphanumeric = false;
+			break;
+		}
+	}
+	if (!endsWithZero || !allCharsAreAlphanumeric) {
+		return false;
+	}
+	return true;
+}
+
 
 void sockaddr_to_str( struct sockaddr a, char* s) {
 	sprintf(s,"%hhu.%hhu.%hhu.%hhu:%hu",
@@ -594,7 +647,117 @@ void sockaddr_to_str( struct sockaddr a, char* s) {
 
 
 void* tcp_main( void* _ ) {
-	
+	// TODO
+	tcp_sd = socket(AF_INET, SOCK_STREAM, 0);
+	if (tcp_sd == -1) {
+		puts("No TCP for us");
+		exit(1);
+	}
+
+	struct sockaddr_in tcp_addr;
+	memset(&tcp_addr, 0, sizeof(tcp_addr) );
+	tcp_addr.sin_family = AF_INET;
+	tcp_addr.sin_port = htons(10101);
+	tcp_addr.sin_addr.s_addr = INADDR_ANY;
+
+	int err = bind(tcp_sd, (struct sockaddr*)&tcp_addr, sizeof(tcp_addr));
+	if (err == -1) {
+		close(tcp_sd);
+		puts("tcper2");
+		exit(1);
+	}
+
+	err = listen(tcp_sd, 3);
+	if (err == -1) {
+		close(tcp_sd);
+		puts("tcper3");
+		exit(1);
+	}
+
+	while (true) {
+		
+		struct SocketAndAddress* bypasser = calloc( sizeof(struct SocketAndAddress), 1 );
+
+		socklen_t bypasser_addrlen;
+		
+		bypasser->sd = accept(tcp_sd, (struct sockaddr*)&bypasser->addr, &bypasser_addrlen);
+		if (!bypasser->sd) {
+			close(tcp_sd);
+			puts("tcper4");
+			exit(1);
+		}
+
+		pthread_t opponent;
+		err = pthread_create(&opponent, NULL, &opponent_main, bypasser);
+		if (err) {
+			close(bypasser->sd);
+			close(tcp_sd);
+			free(bypasser);
+			puts("tcper5");
+			exit(1);
+		}
+	}
+}
+
+void* opponent_main( void* arg ) {
+	////
+	struct SocketAndAddress* opponent = arg;
+
+	// msglen because it's the longest payload ('>' + about 50 characters + '\0')
+	char response[MSG_MAXLEN+2] = {0};
+	while(true) {
+		int len = read(opponent->sd, response, MSG_MAXLEN+2);
+		if (len == 0 || len == -1) {
+			// TODO disconnected?
+			break;
+		}
+
+		// TODO goto destructor?
+		if( !isAProperName(response+1, MSG_MAXLEN+2-1) ) continue;
+
+		// len > 0, which means we need to check the payload
+		if (response[0] == '>') {
+			/// TODO >msg
+			strcpy(opponentBubble, response+1);
+		}
+		else if (response[0] == '!') {
+			/// TODO !mansiya
+		}
+		else if (response[0] == '#') {
+			/// TODO #34
+		}
+		else if (response[0] == '?') {
+			/// TODO ?korsan
+			bool found = false;
+			for (int i = 0; i<gameRequestsX; i++) {
+				bool sameAddr = memcmp(&gameRequests[i].addr, &opponent->addr, sizeof(struct sockaddr_in)) == 0;
+
+				if (sameAddr) {
+					strcpy(gameRequests[i].name, response+1);
+					found = true;
+					break;
+				}
+			}
+
+			if(!found && gameRequestsX != PLAYERS_MAXLEN) {
+				memcpy( &gameRequests[gameRequestsX].addr, &opponent->addr, sizeof(struct sockaddr_in) );
+				strcpy( gameRequests[gameRequestsX].name, response+1);
+				gameRequests[gameRequestsX].sd = opponent->sd;
+				gameRequestsX++;
+			}
+
+		}
+		else if (response[0] == '*') {
+			/// TODO *
+			gameOver = true;
+			gameOverReason = 4; // opponent resigned
+		}
+		else {
+			/// TODO no such msg type
+		}
+	}
+
+	free(arg);
 }
 
 void draw(void) {
@@ -638,6 +801,9 @@ void draw_lobby(void) {
 
 	for (int i = 0; i < gameRequestsX; i++) {
 		setCursorPosition(4, 10+i);
+		char ipAddr[22] = {0};
+		sockaddr_to_str( *(struct sockaddr*) &gameRequests[i].addr, ipAddr);
+		printf("%-22s", ipAddr);
 		printf("%-" TOSTR(NAME_MAXLEN) "s",gameRequests[i].name);
 		draw_button("ACCEPT",highlightX==currentX, clickEffectX==currentX);
 		currentX++;
@@ -793,8 +959,8 @@ void draw_game(void) {
 	setCursorPosition(61,14);
 	draw_button(gameOver?"BACK TO MAIN MENU":"RESIGN", highlightX==66, clickEffectX==66);
 	
-	setCursorPosition(61,16);
-	draw_button("REFRESH SCREEN", highlightX==67, clickEffectX==67);
+	// setCursorPosition(61,16);
+	// draw_button("REFRESH SCREEN", highlightX==67, clickEffectX==67);
 
 	int hx = highlightX%8, hy = highlightX/8;
 	if (clickEffectX!=highlightX && highlightX<64) {
