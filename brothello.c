@@ -110,7 +110,7 @@ int botCountdown = -1;
 const int TRANSITION_TIME = 1;
 int transitionCountdown = 0;
 
-int udp_sd, tcp_sd;
+int udp_sd, tcp_sd, opponent_sd;
 
 
 // PROTOTYPES
@@ -160,6 +160,12 @@ int main(void) {
 }
 
 void program_destructor(void) {
+	close(tcp_sd);
+	close(udp_sd);
+	close(opponent_sd);
+	for (int i = 0; i<gameRequestsX; i++) {
+		close(gameRequests[i].sd);
+	}
 	clearScreen();
 	disableRawMode();
 	makeCursorVisible();
@@ -245,7 +251,7 @@ void* input_main( void* _ ) {
 		NORMAL, GOT_ESC, GOT_91
 	} cpstate = NORMAL;
 
-	int opponent_sd = socket(AF_INET, SOCK_STREAM, 0);
+	opponent_sd = socket(AF_INET, SOCK_STREAM, 0);
 	if (opponent_sd == -1) {
 		puts("cant create socket. input_main er1");
 		exit(1);
@@ -282,6 +288,8 @@ void* input_main( void* _ ) {
 								memset(&gameRequests[i], 0, sizeof(struct player) );
 							}
 							gameRequestsX--;
+							connectingX -= 2;
+							highlightX -= 2;
 						}
 					}
 					else if (highlightX>=3+2*gameRequestsX && highlightX<=2+2*gameRequestsX+onlinePlayersX) {
@@ -296,6 +304,7 @@ void* input_main( void* _ ) {
 						else {
 							// connect
 							close(opponent_sd);
+							opponent_sd = socket(AF_INET, SOCK_STREAM, 0);
 							connectingX = -1;
 							int err = connect(opponent_sd, (struct sockaddr*) &onlinePlayers[reqI].addr, sizeof(struct sockaddr) );
 							if (err == -1) {
@@ -730,6 +739,7 @@ void* opponent_main( void* arg ) {
 			/// TODO ?korsan
 			bool found = false;
 			for (int i = 0; i<gameRequestsX; i++) {
+				// TODO memcmp might be giving false results for paddings
 				bool sameAddr = memcmp(&gameRequests[i].addr, &opponent->addr, sizeof(struct sockaddr_in)) == 0;
 
 				if (sameAddr) {
@@ -744,6 +754,8 @@ void* opponent_main( void* arg ) {
 				strcpy( gameRequests[gameRequestsX].name, response+1);
 				gameRequests[gameRequestsX].sd = opponent->sd;
 				gameRequestsX++;
+				connectingX += 2;
+				highlightX += 2;
 			}
 
 		}
