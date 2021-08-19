@@ -835,27 +835,27 @@ void draw_lobby(void) {
 	setCursorPosition(2,2);
 	setCursorColor(DEFAULT_COLOR);
 	setCursorStyle(DEFAULT_STYLE);
-	printf("BROTHELLO GAME");
+	printf("%s","BROTHELLO GAME");
 
 	setCursorPosition(4,4);
-	printf("Name:           ");
+	printf("%s","Name:           ");
 	draw_input(myName, NAME_MAXLEN, highlightX==currentX++, "John");
 
 	setCursorPosition(4,5);
-	printf("Connect to IP:  ");
+	printf("%s","Connect to IP:  ");
 	draw_input(connectToIp, NAME_MAXLEN, highlightX==currentX++, "127.0.0.1");
 
 	draw_button(connectingX==currentX ? "CANCEL" : "CONNECT", highlightX==currentX, clickEffectX==currentX);
 	
-	if (connectingX==currentX++) printf("Connecting...");
+	if (connectingX==currentX++) printf("%s","Connecting...");
 
 	setCursorPosition(4,6);
 	setCursorStyle(FAINT);
-	printf("If doesn\'t work, connect to each other at the same time.");
+	printf("%s","If doesn\'t work, connect to each other at the same time.");
 	setCursorStyle(DEFAULT_STYLE);
 
 	setCursorPosition(2,8);
-	printf("GAME REQUESTS");
+	printf("%s","GAME REQUESTS");
 
 	for (int i = 0; i < gameRequestsX; i++) {
 		setCursorPosition(4, 10+i);
@@ -870,7 +870,7 @@ void draw_lobby(void) {
 	}
 
 	setCursorPosition(2,11+gameRequestsX);
-	printf("ONLINE PLAYERS");
+	printf("%s","ONLINE PLAYERS");
 
 	for (int i = 0; i < onlinePlayersX; i++) {
 		setCursorPosition(4, 13+gameRequestsX+i);
@@ -879,11 +879,11 @@ void draw_lobby(void) {
 		printf("%-22s", ipAddr);
 		printf("%-" TOSTR(NAME_MAXLEN) "s",onlinePlayers[i].name);
 		draw_button(connectingX==currentX ? "CANCEL" : "CONNECT", highlightX==currentX, clickEffectX==currentX);
-		if (connectingX==currentX++) printf("Connecting...");
+		if (connectingX==currentX++) printf("%s","Connecting...");
 	}
 
 	setCursorPosition(2,14+gameRequestsX+onlinePlayersX);
-	printf("PLAY AGAINST THE MACHINE");
+	printf("%s","PLAY AGAINST THE MACHINE");
 	
 	// hardcoded, because in the near future I'm not planning to add other bots
 	setCursorPosition(4, 16+gameRequestsX+onlinePlayersX);
@@ -900,11 +900,11 @@ void draw_game(void) {
 	setCursorPosition(2,2);
 	setCursorColor(DEFAULT_COLOR);
 	setCursorStyle(DEFAULT_STYLE);
-	printf("BROTHELLO GAME");
+	printf("%s","BROTHELLO GAME");
 
 	setCursorPosition(8,4);
-	printf(empty_space);
-	printf(empty_space);
+	printf("%s",empty_space);
+	printf("%s",empty_space);
 	setCursorPosition(8,4);
 	setCursorColor(GREEN);
 	if (!myTurn) setCursorStyle(BOLD);
@@ -915,8 +915,8 @@ void draw_game(void) {
 	printf(" %s", opponentBubble);
 
 	setCursorPosition(8,23);
-	printf(empty_space);
-	printf(empty_space);
+	printf("%s",empty_space);
+	printf("%s",empty_space);
 	setCursorPosition(8,23);
 	setCursorColor(GREEN);
 	if (myTurn) setCursorStyle(BOLD);
@@ -936,11 +936,11 @@ void draw_game(void) {
 	const char* blackDisk = "┌─┐\n\b\b\b└─┘";
 	const char* whiteDisk = "▗▄▖\n\b\b\b▝▀▘";
 	setCursorPosition(3,4);
-	if (mySide==WHITE_PLAYER) printf(blackDisk);
-	else printf(whiteDisk);
+	if (mySide==WHITE_PLAYER) printf("%s",blackDisk);
+	else printf("%s",whiteDisk);
 	setCursorPosition(3,23);
-	if (mySide==WHITE_PLAYER) printf(whiteDisk);
-	else printf(blackDisk);
+	if (mySide==WHITE_PLAYER) printf("%s",whiteDisk);
+	else printf("%s",blackDisk);
 	
 	struct Move bestMove;
 	if (showHints && myTurn) {
@@ -954,42 +954,42 @@ void draw_game(void) {
 			if (board[y][x]==WHITE_CELL && prevBoard[y][x]==WHITE_CELL ||
 				board[y][x]==WHITE_CELL && prevBoard[y][x]==EMPTY_CELL) {
 				// white
-				printf(whiteDisk);
+				printf("%s",whiteDisk);
 
 			}
 			else if (board[y][x]==BLACK_CELL && prevBoard[y][x]==BLACK_CELL ||
 					board[y][x]==BLACK_CELL && prevBoard[y][x]==EMPTY_CELL) {
 				// black
-				printf(blackDisk);
+				printf("%s",blackDisk);
 
 			}
 			else if (transitionCountdown && board[y][x]==BLACK_CELL && prevBoard[y][x]==WHITE_CELL ||
 					transitionCountdown && board[y][x]==WHITE_CELL && prevBoard[y][x]==BLACK_CELL) {
 				// gray
 				setCursorStyle(FAINT);
-				printf(whiteDisk);
+				printf("%s",whiteDisk);
 				setCursorStyle(DEFAULT_STYLE);
 			}
 			else if (board[y][x]==BLACK_CELL) {
-				printf(blackDisk);
+				printf("%s",blackDisk);
 			}
 			else if (board[y][x]==WHITE_CELL) {
-				printf(whiteDisk);
+				printf("%s",whiteDisk);
 			}
 			else {
 				// dot
 				if (myTurn && showHints && y==bestMove.y && x==bestMove.x) {
 					setCursorColor(RED);
-					printf(" x");
+					printf("%s"," x");
 					setCursorColor(DEFAULT_COLOR);
 				}
 				else if (myTurn && showLegalMoves && moveIsLegal(board,(struct Move){x,y},mySide)) {
 					setCursorColor(YELLOW);
-					printf(" o");
+					printf("%s"," o");
 					setCursorColor(DEFAULT_COLOR);
 				}
 				else {
-					printf(" .");
+					printf("%s"," .");
 				}
 			}
 		}
@@ -997,23 +997,23 @@ void draw_game(void) {
 
 	// buttons here
 	setCursorPosition(40,10);
-	printf(empty_space);
+	printf("%s",empty_space);
 	setCursorPosition(40,10);
 	printf("Hints are %s.", showHints?"on":"off");
 	setCursorPosition(61,10);
 	draw_button(showHints?"TURN OFF":"TURN ON", highlightX==64, clickEffectX==64);
 
 	setCursorPosition(40,12);
-	printf(empty_space);
+	printf("%s",empty_space);
 	setCursorPosition(40,12);
 	printf("Moves are %s.", showLegalMoves?"shown":"not shown");
 	setCursorPosition(61,12);
 	draw_button(showLegalMoves?"HIDE":"SHOW", highlightX==65, clickEffectX==65);
 	
 	setCursorPosition(40,14);
-	printf(empty_space);
+	printf("%s",empty_space);
 	setCursorPosition(40,14);
-	printf(gameOver?gameOverReasons[gameOverReason]:"Game is on.");
+	printf("%s",gameOver?gameOverReasons[gameOverReason]:"Game is on.");
 	setCursorPosition(61,14);
 	draw_button(gameOver?"BACK TO MAIN MENU":"RESIGN", highlightX==66, clickEffectX==66);
 	
@@ -1027,9 +1027,9 @@ void draw_game(void) {
 		if (blinks) setCursorColor(LIGHTBLUE);
 		else setCursorColor(BLUE);
 		setCursorPosition(4+4*hx, 6+2*hy);
-		printf("/\n\b\\");
+		printf("%s","/\n\b\\");
 		setCursorPosition(8+4*hx, 6+2*hy);
-		printf("\\\n\b/");
+		printf("%s","\\\n\b/");
 	}
 
 	// draw_input(myName, NAME_MAXLEN, highlightX==currentX++, "John");
@@ -1046,7 +1046,7 @@ void draw_input(const char* buffer, const int bufLen, const bool highlighted, co
 		if (blinks) setCursorColor(LIGHTBLUE);
 		else setCursorColor(BLUE);
 	}
-	printf("[");
+	printf("%s","[");
 
 	if (*buffer) {
 		printf("%-" TOSTR(NAME_MAXLEN) "s]"  , buffer);
@@ -1063,7 +1063,7 @@ void draw_input(const char* buffer, const int bufLen, const bool highlighted, co
 			if (blinks) setCursorColor(LIGHTBLUE);
 			else setCursorColor(BLUE);
 		}
-		printf("]");
+		printf("%s","]");
 	}
 
 	setCursorStyle(DEFAULT_STYLE);
@@ -1094,9 +1094,9 @@ void draw_button(const char* text, const bool highlighted, const bool clicked) {
 void clearCursorFromBoard(void) {
 	int hx = highlightX%8, hy = highlightX/8;
 	setCursorPosition(4+4*hx, 6+2*hy);
-	printf(" \n\b ");
+	printf("%s"," \n\b ");
 	setCursorPosition(8+4*hx, 6+2*hy);
-	printf(" \n\b ");
+	printf("%s"," \n\b ");
 }
 
 
