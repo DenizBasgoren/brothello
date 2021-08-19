@@ -127,7 +127,7 @@ void draw_input(const char* buffer, const int bufLen, const bool highlighted, co
 void draw_button(const char* text, const bool highlighted, const bool clicked);
 void clearCursorFromBoard(void);
 void prepareGameWithBot(int reqId);
-void prepareGameWithHuman(char* name);
+void prepareGameWithHuman(char* name, enum Player side);
 bool tryToMakeAMove(struct Move m, enum Player side);
 void sockaddr_to_str( struct sockaddr a, char* s);
 void sockaddr_to_stdout( struct sockaddr a );
@@ -273,7 +273,12 @@ void* input_main( void* _ ) {
 								continue;
 							}
 
-							prepareGameWithHuman(gameRequests[reqI].name);
+							// the one who 'accept's plays as white
+							prepareGameWithHuman(gameRequests[reqI].name, WHITE_PLAYER);
+
+							// TODO test this tricky part
+							close(opponent_sd);
+							opponent_sd = gameRequests[reqI].sd;
 						}
 						else {
 							reqI = (highlightX-4)/2;
@@ -367,7 +372,7 @@ void* input_main( void* _ ) {
 					else if (highlightX==66 && c==13) {
 						clickEffectX = highlightX;
 						// Resign
-						if (gameOver) {
+						if (gameOver) { // TODO Go to main menu
 							view = 0;
 							highlightX = 0;
 						}
@@ -375,11 +380,18 @@ void* input_main( void* _ ) {
 							// TODO let other party know via tcp
 							gameOver = true;
 							gameOverReason = 5; // you resigned
+
+							if (!opponentIsBot) {
+								ssize_t bytesSent = write(opponent_sd, "*", 2);
+								if (bytesSent != 2) {
+									close(opponent_sd);
+									gameOver = true;
+									gameOverReason = 4; // opponent resigned (or disconnected)
+								}
+							}
 						}
 					}
-					// else if (highlightX==67 && c==13) {
-					// 	clearScreen();
-					// }
+
 				}
 			}
 			else if (c >= 33 && c <= 125) {
@@ -651,15 +663,28 @@ void* udp_main( void* _ ) {
 
 		if (found) continue;
 
-		if (onlinePlayersX==PLAYERS_MAXLEN) onlinePlayersX = 0;
+		if (onlinePlayersX==PLAYERS_MAXLEN) {
+
+			if (highlightX>=3+2*gameRequestsX+onlinePlayersX) {
+				highlightX -= PLAYERS_MAXLEN;
+			}
+			else if (highlightX>=3+2*gameRequestsX) {
+				highlightX = 2+2*gameRequestsX;
+			}
+
+			onlinePlayersX = 0;
+		}
 
 		memcpy( &onlinePlayers[onlinePlayersX].addr, &bypasser_addr, sizeof(struct sockaddr_in) );
 		strcpy( onlinePlayers[onlinePlayersX].name, response);
-		onlinePlayersX++;
 
-		// TODO increase highlightX if highlighted one is below online players
-		highlightX++;
+		// we use >= here because when we stand at the Zebro entry, after onlinePlayersX++, we stand
+		// on the prev entry now, and need to be advanced.
+		if (highlightX>2+2*gameRequestsX+onlinePlayersX) {
+			highlightX++;
+		}
 		
+		onlinePlayersX++;
 	}
 }
 
@@ -764,29 +789,41 @@ void* opponent_main( void* arg ) {
 			break;
 		}
 
-		// TODO goto destructor?
-		if( !isAProperName(response+1, MSG_MAXLEN+2-1) ) continue;
+		bool nullTerminated = false;
+		for (int i = 0; i<MSG_MAXLEN+2; i++) {
+			if (response[i] == '\0') {
+				nullTerminated = true;
+				break;
+			}
+		}
+
+		if (!nullTerminated) continue;
+
+		// TODO: >, #, * need to be checked, if it's the correct socket or not. Test this part
 
 		// len > 0, which means we need to check the payload
 		if (response[0] == '>') {
-			/// TODO >msg
+			// >msg
+			if (view!=1 || opponent->sd != opponent_sd) continue;
 			strcpy(opponentBubble, response+1);
 		}
 		else if (response[0] == '!') {
-			/// TODO !mansiya
-			prepareGameWithHuman(response+1);
+			// !mansiya
+			if( !isAProperName(response+1, NAME_MAXLEN+1) ) continue;
+			prepareGameWithHuman(response+1, BLACK_PLAYER);
 		}
 		else if (response[0] == '#') {
-			/// TODO #34 (yx) y increasing downwards, x rightwards
+			// #34 (yx) y increasing downwards, x rightwards
+			if (view!=1 || opponent->sd != opponent_sd) continue;
 			tryToMakeAMove((struct Move){response[2]-'0',response[1]-'0'}, !mySide);
 		}
 		else if (response[0] == '?') {
-			/// TODO ?korsan
+			// ?korsan
+			if( !isAProperName(response+1, NAME_MAXLEN+1) ) continue;
+
 			bool found = false;
 			for (int i = 0; i<gameRequestsX; i++) {
-				// TODO memcmp might be giving false results for paddings
 				bool sameAddr = sockaddr_cmp(gameRequests[i].addr, opponent->addr);
-				// bool sameAddr = memcmp(&gameRequests[i].addr, &opponent->addr, sizeof(struct sockaddr_in)) == 0;
 
 				if (sameAddr) {
 					strcpy(gameRequests[i].name, response+1);
@@ -800,18 +837,20 @@ void* opponent_main( void* arg ) {
 				strcpy( gameRequests[gameRequestsX].name, response+1);
 				gameRequests[gameRequestsX].sd = opponent->sd;
 				gameRequestsX++;
-				connectingX += 2;
-				highlightX += 2;
+				if (connectingX != -1) connectingX += 2;
+				if (highlightX>=3+2*gameRequestsX) highlightX += 2;
 			}
 
 		}
 		else if (response[0] == '*') {
-			/// TODO *
+			// *
+			if (view!=1 || opponent->sd != opponent_sd) continue;
+
 			gameOver = true;
 			gameOverReason = 4; // opponent resigned
 		}
 		else {
-			/// TODO no such msg type
+			// ignore if no message patterns match against this string
 		}
 	}
 
@@ -1110,14 +1149,14 @@ void prepareGameWithBot(int reqId) {
 	copyBoard(startingPositionBoard, board);
 	copyBoard(startingPositionBoard, prevBoard);
 	mySide = blinks ? WHITE_PLAYER : BLACK_PLAYER;
-	myTurn = !blinks;
+	myTurn = !blinks; // black first
 	if (!myTurn) botCountdown = BOT_THINKING_TIME;
 	gameOver = false;
 	opponentIsBot = true;
 	strcpy(opponentName, "Zebro");
 }
 
-void prepareGameWithHuman(char* name) {
+void prepareGameWithHuman(char* name, enum Player side) {
 	view = 1;
 	highlightX = 0;
 	connectingX = -1;
@@ -1127,6 +1166,8 @@ void prepareGameWithHuman(char* name) {
 	copyBoard(startingPositionBoard, board);
 	copyBoard(startingPositionBoard, prevBoard);
 	// TODO set mySide and myTurn based on the side
+	mySide = side;
+	myTurn = side == BLACK_PLAYER;
 	gameOver = false;
 	opponentIsBot = false;
 	strcpy(opponentName, name);
@@ -1171,32 +1212,6 @@ void doAftermoveChecks(void) {
 		botCountdown = -1;
 		return;
 	}
-
-	// if (!toPlayStuck) {
-	// 	myTurn = !myTurn;
-	// }
-
-	// if (opponentIsBot) {
-	// 	if (toPlaySide != mySide) {
-	// 		botCountdown = BOT_THINKING_TIME;
-	// 	}
-	// 	else {
-	// 		botCountdown = -1;
-	// 	}
-	// }
-	
-	// att 2
-	// if (toPlayStuck) {
-	// 	if (toPlaySide==!mySide && opponentIsBot) {
-	// 		botCountdown = BOT_THINKING_TIME;
-	// 	}
-	// }
-	// else {
-	// 	myTurn = !myTurn;
-	// 	if (toPlaySide==!mySide && opponentIsBot) {
-	// 		botCountdown = BOT_THINKING_TIME;
-	// 	}
-	// }
 
 	if (toPlaySide!=mySide && opponentIsBot && !toPlayStuck) {
 		botCountdown = BOT_THINKING_TIME;
