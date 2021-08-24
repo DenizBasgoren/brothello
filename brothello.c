@@ -110,7 +110,7 @@ int botCountdown = -1;
 const int TRANSITION_TIME = 1;
 int transitionCountdown = 0;
 
-int udp_sd, tcp_sd, opponent_sd;
+int udp_sd, tcp_server_sd, tcp_client_sd, currentlyPlayingWith_sd;
 
 
 // PROTOTYPES
@@ -127,7 +127,7 @@ void draw_input(const char* buffer, const int bufLen, const bool highlighted, co
 void draw_button(const char* text, const bool highlighted, const bool clicked);
 void clearCursorFromBoard(void);
 void prepareGameWithBot(int reqId);
-void prepareGameWithHuman(char* name, enum Player side);
+void prepareGameWithHuman(char* name, enum Player side, int sd);
 bool tryToMakeAMove(struct Move m, enum Player side);
 void sockaddr_to_str( struct sockaddr a, char* s);
 void sockaddr_to_stdout( struct sockaddr a );
@@ -164,9 +164,9 @@ int main(void) {
 }
 
 void program_destructor(void) {
-	close(tcp_sd);
+	close(tcp_server_sd);
 	close(udp_sd);
-	close(opponent_sd);
+	close(tcp_client_sd);
 	for (int i = 0; i<gameRequestsX; i++) {
 		close(gameRequests[i].sd);
 	}
@@ -229,9 +229,9 @@ void* input_main( void* _ ) {
 		NORMAL, GOT_ESC, GOT_91
 	} cpstate = NORMAL;
 
-	opponent_sd = socket(AF_INET, SOCK_STREAM, 0);
-	if (opponent_sd == -1) {
-		puts("cant create socket. input_main er1");
+	tcp_client_sd = socket(AF_INET, SOCK_STREAM, 0);
+	if (tcp_client_sd == -1) {
+		fprintf(stderr,"cant create socket. input_main er1");
 		exit(1);
 	}
 
@@ -258,6 +258,7 @@ void* input_main( void* _ ) {
 							// TODO accept connection
 							char buffer[NAME_MAXLEN+2] = {'!'};
 							strcpy(buffer+1, myName);
+							fprintf(stderr,"Sent: %s\n",buffer);
 							ssize_t bytesSent = write(gameRequests[reqI].sd, buffer, NAME_MAXLEN+2);
 							if (bytesSent != NAME_MAXLEN+2) {
 								close(gameRequests[reqI].sd);
@@ -273,12 +274,12 @@ void* input_main( void* _ ) {
 								continue;
 							}
 
-							// the one who 'accept's plays as white
-							prepareGameWithHuman(gameRequests[reqI].name, WHITE_PLAYER);
+							close(tcp_client_sd);
+							connectingX = -1;
 
-							// TODO test this tricky part
-							close(opponent_sd);
-							opponent_sd = gameRequests[reqI].sd;
+							// the one who 'accept's plays as white
+							prepareGameWithHuman(gameRequests[reqI].name, WHITE_PLAYER, gameRequests[reqI].sd);
+
 						}
 						else {
 							reqI = (highlightX-4)/2;
@@ -300,29 +301,47 @@ void* input_main( void* _ ) {
 
 						if (highlightX==connectingX) {
 							// cancel
-							close(opponent_sd);
+							close(tcp_client_sd);
 							connectingX = -1;
 						}
 						else {
 							// connect
-							close(opponent_sd);
-							opponent_sd = socket(AF_INET, SOCK_STREAM, 0);
+							close(tcp_client_sd);
+							tcp_client_sd = socket(AF_INET, SOCK_STREAM, 0);
 							connectingX = -1;
-							int err = connect(opponent_sd, (struct sockaddr*) &onlinePlayers[reqI].addr, sizeof(struct sockaddr) );
+							int err = connect(tcp_client_sd, (struct sockaddr*) &onlinePlayers[reqI].addr, sizeof(struct sockaddr) );
 							if (err == -1) {
-								// TODO cant connect
+								// cant connect
+								close(tcp_client_sd);
 								continue;
 							}
 							connectingX=highlightX;
 
 							char buffer[NAME_MAXLEN+2] = {'?'};
-							// strcpy(buffer+1, onlinePlayers[reqI].name); // NOT their name, but mine!
 							strcpy(buffer+1, myName);
-							ssize_t bytesSent = write(opponent_sd, buffer, NAME_MAXLEN+2);
+							fprintf(stderr,"Sent: %s\n",buffer);
+							ssize_t bytesSent = write(tcp_client_sd, buffer, NAME_MAXLEN+2);
 							if (bytesSent != NAME_MAXLEN+2) {
-								close(opponent_sd);
+								close(tcp_client_sd);
 								connectingX = -1;
 							}
+
+							// create a thread for reading
+							// TODO: test
+							struct SocketAndAddress* bypasser = calloc( sizeof(struct SocketAndAddress), 1 );
+							bypasser->sd = tcp_client_sd;
+							bypasser->addr = onlinePlayers[reqI].addr;
+
+							pthread_t opponent;
+							err = pthread_create(&opponent, NULL, &opponent_main, bypasser);
+							if (err) {
+								close(bypasser->sd);
+								close(tcp_server_sd);
+								free(bypasser);
+								fprintf(stderr,"tcper5");
+								exit(1);
+							}
+							
 						}
 
 					}
@@ -347,16 +366,16 @@ void* input_main( void* _ ) {
 						clickEffectX = highlightX;
 
 						if (!opponentIsBot) {
-							char buffer[3] = {'#'};
+							char buffer[4] = {'#'};
 							buffer[1] = highlightX/8 + '0';
 							buffer[2] = highlightX%8 + '0';
-							ssize_t bytesSent = write(opponent_sd, buffer, 3);
-							if (bytesSent != 3) {
-								close(opponent_sd);
+							fprintf(stderr,"Sent: %s\n",buffer);
+							ssize_t bytesSent = write(tcp_client_sd, buffer, 4);
+							if (bytesSent != 4) {
+								close(tcp_client_sd);
 								gameOver = true;
 								gameOverReason = 4; // opponent resigned (or disconnected)
 							}
-							// TODO something here?
 						}
 
 						tryToMakeAMove((struct Move){highlightX%8,highlightX/8}, mySide);
@@ -375,16 +394,17 @@ void* input_main( void* _ ) {
 						if (gameOver) { // TODO Go to main menu
 							view = 0;
 							highlightX = 0;
+							currentlyPlayingWith_sd = 0;
 						}
 						else {
-							// TODO let other party know via tcp
 							gameOver = true;
 							gameOverReason = 5; // you resigned
 
 							if (!opponentIsBot) {
-								ssize_t bytesSent = write(opponent_sd, "*", 2);
+								fprintf(stderr,"Sent: %s\n","*");
+								ssize_t bytesSent = write(tcp_client_sd, "*", 2);
 								if (bytesSent != 2) {
-									close(opponent_sd);
+									close(tcp_client_sd);
 									gameOver = true;
 									gameOverReason = 4; // opponent resigned (or disconnected)
 								}
@@ -420,13 +440,13 @@ void* input_main( void* _ ) {
 						myBubble[myBubbleX++] = c;
 						myBubble[myBubbleX] = '\0';
 					}
-					// TODO bubble send tcp
 					if (!opponentIsBot) {
 						char buffer[MSG_MAXLEN+2] = {'>'};
 						strcpy(buffer+1, myBubble);
-						ssize_t bytesSent = write(opponent_sd, buffer, MSG_MAXLEN+2);
+						fprintf(stderr,"Sent: %s\n",buffer);
+						ssize_t bytesSent = write(tcp_client_sd, buffer, MSG_MAXLEN+2);
 						if (bytesSent != MSG_MAXLEN+2) {
-							close(opponent_sd);
+							close(tcp_client_sd);
 							gameOver = true;
 							gameOverReason = 4; // opponent resigned (or disconnected)
 						}
@@ -448,11 +468,11 @@ void* input_main( void* _ ) {
 				else if (view == 1) {
 					memset(myBubble,'\0',MSG_MAXLEN);
 					myBubbleX = 0;
-					// TODO tcp req (msg removed)
 					if (!opponentIsBot) {
-						ssize_t bytesSent = write(opponent_sd, ">", 2);
+						fprintf(stderr,"Sent: %s\n",">");
+						ssize_t bytesSent = write(tcp_client_sd, ">", 2);
 						if (bytesSent != 2) {
-							close(opponent_sd);
+							close(tcp_client_sd);
 							gameOver = true;
 							gameOverReason = 4; // opponent resigned (or disconnected)
 						}
@@ -478,13 +498,14 @@ void* input_main( void* _ ) {
 					if (myBubbleX > 0) myBubbleX--;
 					myBubble[myBubbleX] = '\0';
 
-					// TODO char input tcp (NOTE: this is a copy from above - char input section)
+					// char input tcp (NOTE: this is a copy from above - char input section)
 					if (!opponentIsBot) {
 						char buffer[MSG_MAXLEN+2] = {'>'};
 						strcpy(buffer+1, myBubble);
-						ssize_t bytesSent = write(opponent_sd, buffer, MSG_MAXLEN+2);
+						fprintf(stderr,"Sent: %s\n",buffer);
+						ssize_t bytesSent = write(tcp_client_sd, buffer, MSG_MAXLEN+2);
 						if (bytesSent != MSG_MAXLEN+2) {
-							close(opponent_sd);
+							close(tcp_client_sd);
 							gameOver = true;
 							gameOverReason = 4; // opponent resigned (or disconnected)
 						}
@@ -548,7 +569,6 @@ void* input_main( void* _ ) {
 				}
 				else if (view == 1) {
 					clearCursorFromBoard();
-					// if (highlightX>=56 && highlightX<64 || highlightX==67) {}
 					if (highlightX>=56 && highlightX<64 || highlightX==66) {}
 					else if (highlightX>=64) highlightX++;
 					else highlightX+=8;
@@ -568,8 +588,6 @@ void* input_main( void* _ ) {
 					else if (highlightX%8==7) {
 						if (highlightX/8<=2) highlightX=64;
 						else if (highlightX/8==3) highlightX=65;
-						// else if (highlightX/8==4) highlightX=66;
-						// else highlightX=67;
 						else highlightX=66;
 					}
 					else highlightX++;
@@ -588,7 +606,6 @@ void* input_main( void* _ ) {
 					if (highlightX==64) highlightX=23;
 					else if (highlightX==65) highlightX=31;
 					else if (highlightX==66) highlightX=39;
-					// else if (highlightX==67) highlightX=47;
 					else if (highlightX%8==0) {}
 					else highlightX--;
 				}
@@ -606,7 +623,7 @@ void* udp_main( void* _ ) {
 
 	udp_sd = socket(AF_INET, SOCK_DGRAM, 0);
 	if (udp_sd == -1) {
-		puts("No UDP for us");
+		fprintf(stderr,"No UDP for us");
 		exit(1);
 	}
 
@@ -622,7 +639,7 @@ void* udp_main( void* _ ) {
 	int err = bind(udp_sd, (struct sockaddr*)&udp_addr, sizeof(udp_addr));
 	if (err == -1) {
 		close(udp_sd);
-		puts("udper2");
+		fprintf(stderr,"udper2");
 		exit(1);
 	}
 
@@ -638,7 +655,7 @@ void* udp_main( void* _ ) {
 		int result = recvfrom(udp_sd, response, NAME_MAXLEN+1, 0, (struct sockaddr*)&bypasser_addr, &bypasser_addrlen);
 		if (result == -1) {
 			close(udp_sd);
-			puts("udper3");
+			fprintf(stderr,"udper3");
 			exit(1);
 		}
 
@@ -726,9 +743,9 @@ bool sockaddr_cmp( struct sockaddr_in a, struct sockaddr_in b) {
 
 
 void* tcp_main( void* _ ) {
-	tcp_sd = socket(AF_INET, SOCK_STREAM, 0);
-	if (tcp_sd == -1) {
-		puts("No TCP for us");
+	tcp_server_sd = socket(AF_INET, SOCK_STREAM, 0);
+	if (tcp_server_sd == -1) {
+		fprintf(stderr,"No TCP for us");
 		exit(1);
 	}
 
@@ -738,17 +755,17 @@ void* tcp_main( void* _ ) {
 	tcp_addr.sin_port = htons(10101);
 	tcp_addr.sin_addr.s_addr = INADDR_ANY;
 
-	int err = bind(tcp_sd, (struct sockaddr*)&tcp_addr, sizeof(tcp_addr));
+	int err = bind(tcp_server_sd, (struct sockaddr*)&tcp_addr, sizeof(tcp_addr));
 	if (err == -1) {
-		close(tcp_sd);
-		puts("tcper2");
+		close(tcp_server_sd);
+		fprintf(stderr,"tcper2");
 		exit(1);
 	}
 
-	err = listen(tcp_sd, 3);
+	err = listen(tcp_server_sd, 3);
 	if (err == -1) {
-		close(tcp_sd);
-		puts("tcper3");
+		close(tcp_server_sd);
+		fprintf(stderr,"tcper3");
 		exit(1);
 	}
 
@@ -758,10 +775,10 @@ void* tcp_main( void* _ ) {
 
 		socklen_t bypasser_addrlen = sizeof(struct sockaddr);
 		
-		bypasser->sd = accept(tcp_sd, (struct sockaddr*)&bypasser->addr, &bypasser_addrlen);
+		bypasser->sd = accept(tcp_server_sd, (struct sockaddr*)&bypasser->addr, &bypasser_addrlen);
 		if (!bypasser->sd) {
-			close(tcp_sd);
-			puts("tcper4");
+			close(tcp_server_sd);
+			fprintf(stderr,"tcper4");
 			exit(1);
 		}
 
@@ -769,9 +786,9 @@ void* tcp_main( void* _ ) {
 		err = pthread_create(&opponent, NULL, &opponent_main, bypasser);
 		if (err) {
 			close(bypasser->sd);
-			close(tcp_sd);
+			close(tcp_server_sd);
 			free(bypasser);
-			puts("tcper5");
+			fprintf(stderr,"tcper5");
 			exit(1);
 		}
 	}
@@ -783,7 +800,11 @@ void* opponent_main( void* arg ) {
 	// msglen because it's the longest payload ('>' + about 50 characters + '\0')
 	char response[MSG_MAXLEN+2] = {0};
 	while(true) {
+
+		memset(response, 0, MSG_MAXLEN+2);
 		int len = read(opponent->sd, response, MSG_MAXLEN+2);
+		fprintf(stderr,"Recv (len %d): %s\n",len,response);
+
 		if (len == 0 || len == -1) {
 			// TODO disconnected?
 			break;
@@ -804,21 +825,25 @@ void* opponent_main( void* arg ) {
 		// len > 0, which means we need to check the payload
 		if (response[0] == '>') {
 			// >msg
-			if (view!=1 || opponent->sd != opponent_sd) continue;
+			if (view!=1 || opponent->sd != currentlyPlayingWith_sd) continue;
 			strcpy(opponentBubble, response+1);
 		}
 		else if (response[0] == '!') {
 			// !mansiya
+			if (opponent->sd != tcp_client_sd) continue;
+
 			if( !isAProperName(response+1, NAME_MAXLEN+1) ) continue;
-			prepareGameWithHuman(response+1, BLACK_PLAYER);
+			prepareGameWithHuman(response+1, BLACK_PLAYER, opponent->sd);
 		}
 		else if (response[0] == '#') {
 			// #34 (yx) y increasing downwards, x rightwards
-			if (view!=1 || opponent->sd != opponent_sd) continue;
+			if (view!=1 || opponent->sd != currentlyPlayingWith_sd) continue;
 			tryToMakeAMove((struct Move){response[2]-'0',response[1]-'0'}, !mySide);
 		}
 		else if (response[0] == '?') {
 			// ?korsan
+			if ( opponent->sd == tcp_client_sd) continue;
+
 			if( !isAProperName(response+1, NAME_MAXLEN+1) ) continue;
 
 			bool found = false;
@@ -844,7 +869,7 @@ void* opponent_main( void* arg ) {
 		}
 		else if (response[0] == '*') {
 			// *
-			if (view!=1 || opponent->sd != opponent_sd) continue;
+			if (view!=1 || opponent->sd != currentlyPlayingWith_sd) continue;
 
 			gameOver = true;
 			gameOverReason = 4; // opponent resigned
@@ -1156,7 +1181,7 @@ void prepareGameWithBot(int reqId) {
 	strcpy(opponentName, "Zebro");
 }
 
-void prepareGameWithHuman(char* name, enum Player side) {
+void prepareGameWithHuman(char* name, enum Player side, int sd) {
 	view = 1;
 	highlightX = 0;
 	connectingX = -1;
@@ -1168,6 +1193,7 @@ void prepareGameWithHuman(char* name, enum Player side) {
 	// TODO set mySide and myTurn based on the side
 	mySide = side;
 	myTurn = side == BLACK_PLAYER;
+	currentlyPlayingWith_sd = sd;
 	gameOver = false;
 	opponentIsBot = false;
 	strcpy(opponentName, name);
