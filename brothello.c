@@ -166,8 +166,13 @@ int main(void) {
 void program_destructor(void) {
 	close(tcp_server_sd);
 	close(udp_sd);
+	ssize_t bytesSent;
+	if (connectingX > -1) {
+		bytesSent = write(tcp_client_sd, "-", 2);
+	}
 	close(tcp_client_sd);
 	for (int i = 0; i<gameRequestsX; i++) {
+		bytesSent = write(gameRequests[i].sd, "-", 2);
 		close(gameRequests[i].sd);
 	}
 	clearScreen();
@@ -284,6 +289,9 @@ void* input_main( void* _ ) {
 						else {
 							reqI = (highlightX-4)/2;
 							// reject code
+							fprintf(stderr,"Sent: %s\n","-");
+							ssize_t bytesSent = write(gameRequests[reqI].sd, "-", 2);
+							
 							close(gameRequests[reqI].sd);
 							for (int i = reqI+1; i<gameRequestsX; i++) {
 								memcpy(&gameRequests[i-1], &gameRequests[i], sizeof(struct player) );
@@ -301,6 +309,9 @@ void* input_main( void* _ ) {
 
 						if (highlightX==connectingX) {
 							// cancel
+							fprintf(stderr,"Sent: %s\n","-");
+							ssize_t bytesSent = write(tcp_client_sd, "-", 2);
+							
 							close(tcp_client_sd);
 							connectingX = -1;
 						}
@@ -327,7 +338,6 @@ void* input_main( void* _ ) {
 							}
 
 							// create a thread for reading
-							// TODO: test
 							struct SocketAndAddress* bypasser = calloc( sizeof(struct SocketAndAddress), 1 );
 							bypasser->sd = tcp_client_sd;
 							bypasser->addr = onlinePlayers[reqI].addr;
@@ -374,7 +384,7 @@ void* input_main( void* _ ) {
 							if (bytesSent != 4) {
 								close(tcp_client_sd);
 								gameOver = true;
-								gameOverReason = 4; // opponent resigned (or disconnected)
+								gameOverReason = 3; // opponent disconnected
 							}
 						}
 
@@ -406,7 +416,7 @@ void* input_main( void* _ ) {
 								if (bytesSent != 2) {
 									close(tcp_client_sd);
 									gameOver = true;
-									gameOverReason = 4; // opponent resigned (or disconnected)
+									gameOverReason = 3; // opponent disconnected
 								}
 							}
 						}
@@ -448,7 +458,7 @@ void* input_main( void* _ ) {
 						if (bytesSent != MSG_MAXLEN+2) {
 							close(tcp_client_sd);
 							gameOver = true;
-							gameOverReason = 4; // opponent resigned (or disconnected)
+							gameOverReason = 3; // opponent disconnected
 						}
 					}
 				}
@@ -474,7 +484,7 @@ void* input_main( void* _ ) {
 						if (bytesSent != 2) {
 							close(tcp_client_sd);
 							gameOver = true;
-							gameOverReason = 4; // opponent resigned (or disconnected)
+							gameOverReason = 3; // opponent disconnected
 						}
 					}
 				}
@@ -507,7 +517,7 @@ void* input_main( void* _ ) {
 						if (bytesSent != MSG_MAXLEN+2) {
 							close(tcp_client_sd);
 							gameOver = true;
-							gameOverReason = 4; // opponent resigned (or disconnected)
+							gameOverReason = 3; // opponent disconnected
 						}
 					}
 				}
@@ -820,8 +830,6 @@ void* opponent_main( void* arg ) {
 
 		if (!nullTerminated) continue;
 
-		// TODO: >, #, * need to be checked, if it's the correct socket or not. Test this part
-
 		// len > 0, which means we need to check the payload
 		if (response[0] == '>') {
 			// >msg
@@ -873,6 +881,38 @@ void* opponent_main( void* arg ) {
 
 			gameOver = true;
 			gameOverReason = 4; // opponent resigned
+		}
+		else if (response[0] == '-') {
+			if ( opponent->sd == tcp_client_sd) {
+				// they rejected. do "cancel"
+				close(opponent->sd);
+				connectingX = -1;
+			}
+			else {
+				// they disconnected. do "reject"
+				int reqI = -1; // not found
+				for (int i = 0; i<gameRequestsX; i++) {
+					if (gameRequests[i].sd == opponent->sd) {
+						reqI = i;
+						break;
+					}
+				}
+
+				close(opponent->sd);
+
+				if (reqI == -1) {
+					continue;
+				}
+
+				for (int i = reqI+1; i<gameRequestsX; i++) {
+					memcpy(&gameRequests[i-1], &gameRequests[i], sizeof(struct player) );
+					memset(&gameRequests[i], 0, sizeof(struct player) );
+				}
+				gameRequestsX--;
+				connectingX -= 2;
+				
+				if (highlightX >= 3+2*reqI) highlightX -= 2;
+			}
 		}
 		else {
 			// ignore if no message patterns match against this string
@@ -1190,10 +1230,13 @@ void prepareGameWithHuman(char* name, enum Player side, int sd) {
 	memset(opponentBubble,'\0',MSG_MAXLEN);
 	copyBoard(startingPositionBoard, board);
 	copyBoard(startingPositionBoard, prevBoard);
-	// TODO set mySide and myTurn based on the side
 	mySide = side;
 	myTurn = side == BLACK_PLAYER;
 	currentlyPlayingWith_sd = sd;
+	for (int i = 0; i<gameRequestsX; i++) {
+		if ( gameRequests[i].sd != sd) close( gameRequests[i].sd );
+	}
+	gameRequestsX = 0;
 	gameOver = false;
 	opponentIsBot = false;
 	strcpy(opponentName, name);
