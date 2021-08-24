@@ -134,6 +134,7 @@ void sockaddr_to_stdout( struct sockaddr a );
 bool sockaddr_cmp( struct sockaddr_in a, struct sockaddr_in b);
 bool isAProperName( const char* str, int len);
 void doAftermoveChecks(void);
+struct sockaddr_in parseIP(void);
 
 int main(void) {
 
@@ -254,7 +255,57 @@ void* input_main( void* _ ) {
 					clickEffectX=highlightX;
 
 					if (highlightX==2) {
-						// TODO connect to IP code
+						// connect to IP code
+						// TODO this section is a copy of "connect to lan player" below. put in a func later
+
+						if (highlightX==connectingX) {
+							// cancel
+							fprintf(stderr,"Sent: %s\n","-");
+							ssize_t bytesSent = write(tcp_client_sd, "-", 2);
+							
+							close(tcp_client_sd);
+							connectingX = -1;
+						}
+						else {
+							// connect
+							close(tcp_client_sd);
+							tcp_client_sd = socket(AF_INET, SOCK_STREAM, 0);
+							connectingX = -1;
+							struct sockaddr_in addr = parseIP();
+							int err = connect(tcp_client_sd, (struct sockaddr*) &addr, sizeof(struct sockaddr) );
+							if (err == -1) {
+								// cant connect
+								close(tcp_client_sd);
+								continue;
+							}
+							connectingX=highlightX;
+
+							char buffer[NAME_MAXLEN+2] = {'?'};
+							strcpy(buffer+1, myName);
+							fprintf(stderr,"Sent: %s\n",buffer);
+							ssize_t bytesSent = write(tcp_client_sd, buffer, NAME_MAXLEN+2);
+							if (bytesSent != NAME_MAXLEN+2) {
+								close(tcp_client_sd);
+								connectingX = -1;
+							}
+
+							// create a thread for reading
+							struct SocketAndAddress* bypasser = calloc( sizeof(struct SocketAndAddress), 1 );
+							bypasser->sd = tcp_client_sd;
+							bypasser->addr = addr;
+
+							pthread_t opponent;
+							err = pthread_create(&opponent, NULL, &opponent_main, bypasser);
+							if (err) {
+								close(bypasser->sd);
+								close(tcp_server_sd);
+								free(bypasser);
+								fprintf(stderr,"tcper5");
+								exit(1);
+							}
+							
+						}
+
 					}
 					else if (highlightX>=3 && highlightX<=2+2*gameRequestsX) {
 						clickEffectX=highlightX;
@@ -869,9 +920,9 @@ void* opponent_main( void* arg ) {
 				memcpy( &gameRequests[gameRequestsX].addr, &opponent->addr, sizeof(struct sockaddr_in) );
 				strcpy( gameRequests[gameRequestsX].name, response+1);
 				gameRequests[gameRequestsX].sd = opponent->sd;
-				gameRequestsX++;
-				if (connectingX != -1) connectingX += 2;
+				if (connectingX > 2) connectingX += 2;
 				if (highlightX>=3+2*gameRequestsX) highlightX += 2;
+				gameRequestsX++;
 			}
 
 		}
@@ -1292,4 +1343,10 @@ void doAftermoveChecks(void) {
 	if (!toPlayStuck) {
 		myTurn = !myTurn;
 	}
+}
+
+
+struct sockaddr_in parseIP(void) {
+	connectingX = highlightX;
+	return onlinePlayers[0].addr; // TODO parse the actual address
 }
