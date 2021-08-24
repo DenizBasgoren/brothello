@@ -370,7 +370,7 @@ void* input_main( void* _ ) {
 							buffer[1] = highlightX/8 + '0';
 							buffer[2] = highlightX%8 + '0';
 							fprintf(stderr,"Sent: %s\n",buffer);
-							ssize_t bytesSent = write(tcp_client_sd, buffer, 4);
+							ssize_t bytesSent = write(currentlyPlayingWith_sd, buffer, 4);
 							if (bytesSent != 4) {
 								close(tcp_client_sd);
 								gameOver = true;
@@ -402,7 +402,7 @@ void* input_main( void* _ ) {
 
 							if (!opponentIsBot) {
 								fprintf(stderr,"Sent: %s\n","*");
-								ssize_t bytesSent = write(tcp_client_sd, "*", 2);
+								ssize_t bytesSent = write(currentlyPlayingWith_sd, "*", 2);
 								if (bytesSent != 2) {
 									close(tcp_client_sd);
 									gameOver = true;
@@ -444,7 +444,7 @@ void* input_main( void* _ ) {
 						char buffer[MSG_MAXLEN+2] = {'>'};
 						strcpy(buffer+1, myBubble);
 						fprintf(stderr,"Sent: %s\n",buffer);
-						ssize_t bytesSent = write(tcp_client_sd, buffer, MSG_MAXLEN+2);
+						ssize_t bytesSent = write(currentlyPlayingWith_sd, buffer, MSG_MAXLEN+2);
 						if (bytesSent != MSG_MAXLEN+2) {
 							close(tcp_client_sd);
 							gameOver = true;
@@ -470,7 +470,7 @@ void* input_main( void* _ ) {
 					myBubbleX = 0;
 					if (!opponentIsBot) {
 						fprintf(stderr,"Sent: %s\n",">");
-						ssize_t bytesSent = write(tcp_client_sd, ">", 2);
+						ssize_t bytesSent = write(currentlyPlayingWith_sd, ">", 2);
 						if (bytesSent != 2) {
 							close(tcp_client_sd);
 							gameOver = true;
@@ -503,7 +503,7 @@ void* input_main( void* _ ) {
 						char buffer[MSG_MAXLEN+2] = {'>'};
 						strcpy(buffer+1, myBubble);
 						fprintf(stderr,"Sent: %s\n",buffer);
-						ssize_t bytesSent = write(tcp_client_sd, buffer, MSG_MAXLEN+2);
+						ssize_t bytesSent = write(currentlyPlayingWith_sd, buffer, MSG_MAXLEN+2);
 						if (bytesSent != MSG_MAXLEN+2) {
 							close(tcp_client_sd);
 							gameOver = true;
