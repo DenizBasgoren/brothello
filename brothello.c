@@ -134,7 +134,7 @@ void sockaddr_to_stdout( struct sockaddr a );
 bool sockaddr_cmp( struct sockaddr_in a, struct sockaddr_in b);
 bool isAProperName( const char* str, int len);
 void doAftermoveChecks(void);
-struct sockaddr_in parseIP(void);
+struct sockaddr_in parseIP(char* ip, int len);
 
 int main(void) {
 
@@ -271,7 +271,7 @@ void* input_main( void* _ ) {
 							close(tcp_client_sd);
 							tcp_client_sd = socket(AF_INET, SOCK_STREAM, 0);
 							connectingX = -1;
-							struct sockaddr_in addr = parseIP();
+							struct sockaddr_in addr = parseIP(connectToIp, connectToIpX);
 							int err = connect(tcp_client_sd, (struct sockaddr*) &addr, sizeof(struct sockaddr) );
 							if (err == -1) {
 								// cant connect
@@ -1346,7 +1346,63 @@ void doAftermoveChecks(void) {
 }
 
 
-struct sockaddr_in parseIP(void) {
+struct sockaddr_in parseIP(char* ip, int len) {
 	connectingX = highlightX;
-	return onlinePlayers[0].addr; // TODO parse the actual address
+
+	struct sockaddr_in addr;
+	memset( &addr, 0, sizeof(struct sockaddr_in) );
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons(10101);
+
+	int currentByteX = 3; // starting from the end
+	int byte = 0;
+	int exponent = 1;
+
+	for (int i = len-1; i >= 0; i--) {
+		if (ip[i] == '.') {
+			if (exponent == 1) {
+				goto returnEmptyAddr; // this prevents strings as "210.0..2"
+			}
+			if (currentByteX == 0) {
+				goto returnEmptyAddr; // this prevents more than 3 dots
+			}
+
+			*(((unsigned char*)&addr.sin_addr.s_addr)+currentByteX) = (unsigned char) byte;
+			exponent = 1;
+			currentByteX--;
+			byte = 0;
+		}
+		else if (ip[i] >= '0' && ip[i] <= '9') {
+			byte += (ip[i] - '0') * exponent;
+			exponent *= 10;
+			if (byte > 255) {
+				goto returnEmptyAddr; // byte can't be > 255
+			}
+		}
+		else {
+			// can't have any other characters
+			goto returnEmptyAddr;
+		}
+
+	}
+
+	if (currentByteX == 0) {
+		*(((unsigned char*)&addr.sin_addr.s_addr)+currentByteX) = (unsigned char) byte;
+	}
+	else {
+		goto returnEmptyAddr; // this prevents less than 3 dots
+	}
+
+	char debug_[20] = {0};
+	sockaddr_to_str( *(struct sockaddr*) &addr, debug_);
+	fprintf(stderr, "ParseIP: %s\n", debug_);
+	return addr;
+
+	// i like goto c:
+	returnEmptyAddr:
+	memset( &addr, 0, sizeof(struct sockaddr_in) );
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons(10101);
+	return addr;
+
 }
