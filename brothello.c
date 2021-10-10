@@ -1,6 +1,7 @@
 
 #include <errno.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -114,7 +115,7 @@ int udp_sd, tcp_server_sd, tcp_client_sd, currentlyPlayingWith_sd;
 
 
 // PROTOTYPES
-void program_destructor(void);
+void program_destructor(int signum);
 void* timer_main( void* _ );
 void* input_main( void* _ );
 void* udp_main( void* _ );
@@ -143,7 +144,12 @@ int main(void) {
 	clearScreen();
 	makeCursorInvisible();
 	enableRawMode();
-	atexit(program_destructor);
+	atexit( (void (*)(void)) program_destructor);
+	
+	int signals[] = {SIGFPE, SIGILL, SIGSEGV, SIGBUS, SIGABRT, SIGIOT, SIGTRAP, SIGSYS, SIGTERM, SIGINT, SIGQUIT, SIGKILL, SIGHUP, SIGPIPE, SIGXCPU, SIGXFSZ};
+	for (int i = 0; i < sizeof(signals)/sizeof(int); i++) {
+		signal(signals[i], program_destructor);
+	}
 
 	pthread_t timer, input, udp, tcp;
 
@@ -164,7 +170,7 @@ int main(void) {
 	return 0;
 }
 
-void program_destructor(void) {
+void program_destructor(int signum) {
 	close(tcp_server_sd);
 	close(udp_sd);
 	ssize_t bytesSent;
